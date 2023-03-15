@@ -1,0 +1,21 @@
+{
+	"folders": [
+		{
+			"name": "webdev",
+			"path": "..",
+		},
+		{
+			"name": "webdev cli",
+			"path": "../webdev",
+		},
+		{
+			"name": "Developer Service",
+			"path": "../dwds"
+		},
+		{
+			"name": "Debug Extension",
+			"path": "../dwds/debug_extension_mv3"
+		},
+	],
+	"settings": {}
+}
