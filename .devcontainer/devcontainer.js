@@ -1,5 +1,0 @@
-{
-  "image": "dart:latest",
-  "features": {
-  }
-}
