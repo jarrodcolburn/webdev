@@ -2,13 +2,7 @@
 // for details. All rights reserved. Use of this source code is governed by a
 // BSD-style license that can be found in the LICENSE file.
 
-@JS()
-library devtools;
-
-import 'dart:html';
-
 import 'package:dwds/data/debug_info.dart';
-import 'package:js/js.dart';
 
 import 'chrome_api.dart';
 import 'logger.dart';
@@ -17,20 +11,14 @@ import 'utils.dart';
 
 bool panelsExist = false;
 
-void main() async {
-  _registerListeners();
+Future<void> main() async {
+  await _registerListeners();
   await _maybeCreatePanels();
 }
 
-void _registerListeners() {
-  chrome.storage.onChanged.addListener(
-    allowInterop((
-      Object _,
-      String storageArea,
-    ) {
-      _maybeCreatePanels();
-    }),
-  );
+Future<void> _registerListeners() async {
+  chrome.storage.onChanged
+      .listen((OnChangedEvent onChangedEvent) => _maybeCreatePanels());
 }
 
 Future<void> _maybeCreatePanels() async {
@@ -40,32 +28,32 @@ Future<void> _maybeCreatePanels() async {
     type: StorageObject.debugInfo,
     tabId: tabId,
   );
-  if (debugInfo == null) return;
+  if (debugInfo case null) return;
   final isInternalBuild = debugInfo.isInternalBuild ?? false;
   if (!isInternalBuild) return;
   // Create a Debugger panel for all internal apps:
-  chrome.devtools.panels.create(
+  final panel = await chrome.devtools.panels.create(
     isDevMode ? '[DEV] Dart Debugger' : 'Dart Debugger',
     '',
     'static_assets/debugger_panel.html',
-    allowInterop((ExtensionPanel panel) => _onPanelAdded(panel, debugInfo)),
   );
+  _onPanelAdded(panel, debugInfo);
   // Create an inspector panel for internal Flutter apps:
   final isFlutterApp = debugInfo.isFlutterApp ?? false;
   if (isFlutterApp) {
-    chrome.devtools.panels.create(
-      isDevMode ? '[DEV] Flutter Inspector' : 'Flutter Inspector',
-      '',
-      'static_assets/inspector_panel.html',
-      allowInterop((ExtensionPanel panel) => _onPanelAdded(panel, debugInfo)),
-    );
+    final panel = await chrome.devtools.panels.create(
+        isDevMode ? '[DEV] Flutter Inspector' : 'Flutter Inspector',
+        '',
+        'static_assets/inspector_panel.html');
+    _onPanelAdded(panel, debugInfo);
   }
   panelsExist = true;
 }
 
 void _onPanelAdded(ExtensionPanel panel, DebugInfo debugInfo) {
-  panel.onShown.addListener(
-    allowInterop((Window window) {
+  panel.onShown.listen(
+    ((window) {
+      // FIXME is this JSObject window? or Chrome API window?
       if (window.origin != debugInfo.appOrigin) {
         debugWarn('Page at ${window.origin} is no longer a Dart app.');
         // TODO(elliette): Display banner that panel is not applicable. See:

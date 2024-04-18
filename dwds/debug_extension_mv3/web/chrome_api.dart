@@ -6,6 +6,7 @@ export 'package:chrome_extension/chrome.dart';
 export 'package:chrome_extension/commands.dart';
 export 'package:chrome_extension/debugger.dart';
 export 'package:chrome_extension/devtools.dart';
+export 'package:chrome_extension/devtools_panels.dart';
 export 'package:chrome_extension/notifications.dart';
 export 'package:chrome_extension/runtime.dart';
 export 'package:chrome_extension/storage.dart';

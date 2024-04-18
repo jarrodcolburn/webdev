@@ -7,7 +7,6 @@ library debug_session;
 
 import 'dart:async';
 import 'dart:convert';
-import 'dart:js_interop';
 
 import 'package:built_collection/built_collection.dart';
 import 'package:collection/collection.dart' show IterableExtension;
@@ -19,7 +18,6 @@ import 'package:dwds/src/sockets.dart';
 // import 'package:js/js.dart';
 // import 'package:js/js_util.dart' as js_util;
 import 'package:sse/client/sse_client.dart';
-import 'package:web/web.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
 
 import 'chrome_api.dart';
@@ -204,7 +202,7 @@ void _registerDebugEventListeners() {
     ((onDetachEvent) async {
       await _handleDebuggerDetach(
         OnDetachEvent(
-            source: onDetachEvent.source, reason: DetachReason.canceledByUser),
+            source: onDetachEvent.source, reason: DetachReason.canceledByUser,),
       );
     }),
   );
@@ -547,10 +545,8 @@ Future<void> _handleDebuggerDetach(OnDetachEvent onDetachEvent) async {
 Future<void> _maybeCloseDevTools(int? devToolsTabId) async {
   if (devToolsTabId == null) return;
   final devToolsTab = await chrome.tabs.get(devToolsTabId);
-  if (devToolsTab != null) {
-    debugLog('Closing DevTools tab...');
-    await removeTab(devToolsTabId);
-  }
+  debugLog('Closing DevTools tab...');
+  await removeTab(devToolsTabId);
 }
 
 Future<void> _removeDebugSessionDataInStorage(int tabId) async {
@@ -881,9 +877,5 @@ class _InjectedParams {
   external String get expresion;
   external bool get returnByValue;
   external int get contextId;
-  external factory _InjectedParams({
-    String? expression,
-    bool? returnByValue,
-    int? contextId,
-  });
+  external factory _InjectedParams();
 }

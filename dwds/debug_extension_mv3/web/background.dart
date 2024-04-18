@@ -4,11 +4,12 @@
 
 library background;
 
+import 'dart:js_interop';
+
+import 'package:chrome_extension/action.dart';
 import 'package:chrome_extension/web_navigation.dart';
 import 'package:dwds/data/debug_info.dart';
-// import 'package:js/js.dart';
 
-import 'dart:js_interop';
 import 'chrome_api.dart';
 import 'cider_connection.dart';
 import 'cross_extension_communication.dart';
@@ -23,26 +24,50 @@ void main() {
   _registerListeners();
 }
 
-void _registerListeners() {
-  chrome.runtime.onMessage.listen(
-    _handleRuntimeMessages,
+DebugInfo _addTabInfo(DebugInfo debugInfo, {required Tab tab}) {
+  return DebugInfo(
+    (b) => b
+      ..appEntrypointPath = debugInfo.appEntrypointPath
+      ..appId = debugInfo.appId
+      ..appInstanceId = debugInfo.appInstanceId
+      ..appOrigin = debugInfo.appOrigin
+      ..appUrl = debugInfo.appUrl
+      ..authUrl = debugInfo.authUrl
+      ..extensionUrl = debugInfo.extensionUrl
+      ..isInternalBuild = debugInfo.isInternalBuild
+      ..isFlutterApp = debugInfo.isFlutterApp
+      ..workspaceName = debugInfo.workspaceName
+      ..tabUrl = tab.url
+      ..tabId = tab.id,
   );
-  // The only extension allowed to send messages to this extension is the
-  // AngularDart DevTools extension. Its permission is set in the manifest.json
-  // externally_connectable field.
-  chrome.runtime.onMessageExternal.listen(
-    (handleMessagesFromAngularDartDevTools),
-  );
-  // The only external service that sends messages to the Dart Debug Extension
-  // is Cider.
-  chrome.runtime.onConnectExternal.listen((handleCiderConnectRequest));
-  // Update the extension icon on tab navigation:
-  chrome.tabs.onActivated
-      .listen((OnActivatedActiveInfo info) => _updateIcon(info.tabId));
-  chrome.windows.onFocusChanged.listen(_updateIcon);
-  chrome.webNavigation.onCommitted.listen((_detectNavigationAwayFromDartApp));
+}
 
-  chrome.commands.onCommand.listen((_maybeSendCopyAppIdRequest));
+Future<void> _detectNavigationAwayFromDartApp(
+  OnCommittedDetails navigationInfo,
+) async {
+  // Ignore any navigation events within the page itself (e.g., opening a link,
+  // reloading the page, reloading an IFRAME, etc):
+  if (_isInternalNavigation(navigationInfo)) return;
+  final tabId = navigationInfo.tabId;
+  final debugInfo = await _fetchDebugInfo(navigationInfo.tabId);
+  if (debugInfo == null) return;
+  if (debugInfo.tabUrl != navigationInfo.url) {
+    _setDefaultIcon(navigationInfo.tabId);
+    await clearStaleDebugSession(tabId);
+    await removeStorageObject(type: StorageObject.debugInfo, tabId: tabId);
+    await detachDebugger(
+      tabId,
+      type: TabType.dartApp,
+      reason: DetachReason.canceledByUser, // TODO was 'navigatedAwayFromApp'
+    );
+  }
+}
+
+Future<DebugInfo?> _fetchDebugInfo(int tabId) {
+  return fetchStorageObject<DebugInfo>(
+    type: StorageObject.debugInfo,
+    tabId: tabId,
+  );
 }
 
 Future<void> _handleRuntimeMessages(
@@ -89,10 +114,10 @@ Future<void> _handleRuntimeMessages(
       if (!await _matchesAppInStorage(debugInfo.appId,
           tabId: dartTab.id ??
               (throw Exception(
-                  'Tab ID is missing when trying to clear old debug session data.')))) {
+                  'Tab ID is missing when trying to clear old debug session data.',)),)) {
         await clearStaleDebugSession(dartTab.id ??
             (throw Exception(
-                'Tab ID is missing when trying to clear stale debug session.')));
+                'Tab ID is missing when trying to clear stale debug session.',)),);
       }
       // Save the debug info for the Dart app in storage:
       await setStorageObject<DebugInfo>(
@@ -104,7 +129,7 @@ Future<void> _handleRuntimeMessages(
       final currentTab = await activeTab;
       if (currentTab?.id == dartTab.id) {
         await _updateIcon(dartTab.id ??
-            (throw Exception('Tab ID is missing when trying to update icon.')));
+            (throw Exception('Tab ID is missing when trying to update icon.')),);
       }
     },
   );
@@ -158,7 +183,7 @@ Future<void> _handleRuntimeMessages(
         tabId: dartTab.id,
       );
       _setWarningIcon(dartTab.id ??
-          (throw Exception('Tab ID is missing when setting warning icon.')));
+          (throw Exception('Tab ID is missing when setting warning icon.')),);
     },
   );
 
@@ -176,27 +201,6 @@ Future<void> _handleRuntimeMessages(
   sendResponse.callAsFunction(defaultResponse);
 }
 
-Future<void> _detectNavigationAwayFromDartApp(
-  OnCommittedDetails navigationInfo,
-) async {
-  // Ignore any navigation events within the page itself (e.g., opening a link,
-  // reloading the page, reloading an IFRAME, etc):
-  if (_isInternalNavigation(navigationInfo)) return;
-  final tabId = navigationInfo.tabId;
-  final debugInfo = await _fetchDebugInfo(navigationInfo.tabId);
-  if (debugInfo == null) return;
-  if (debugInfo.tabUrl != navigationInfo.url) {
-    _setDefaultIcon(navigationInfo.tabId);
-    await clearStaleDebugSession(tabId);
-    await removeStorageObject(type: StorageObject.debugInfo, tabId: tabId);
-    await detachDebugger(
-      tabId,
-      type: TabType.dartApp,
-      reason: DetachReason.canceledByUser, // TODO was 'navigatedAwayFromApp'
-    );
-  }
-}
-
 bool _isInternalNavigation(OnCommittedDetails navigationInfo) {
   return [
     'auto_subframe',
@@ -207,22 +211,9 @@ bool _isInternalNavigation(OnCommittedDetails navigationInfo) {
   ].contains(navigationInfo.transitionType);
 }
 
-DebugInfo _addTabInfo(DebugInfo debugInfo, {required Tab tab}) {
-  return DebugInfo(
-    (b) => b
-      ..appEntrypointPath = debugInfo.appEntrypointPath
-      ..appId = debugInfo.appId
-      ..appInstanceId = debugInfo.appInstanceId
-      ..appOrigin = debugInfo.appOrigin
-      ..appUrl = debugInfo.appUrl
-      ..authUrl = debugInfo.authUrl
-      ..extensionUrl = debugInfo.extensionUrl
-      ..isInternalBuild = debugInfo.isInternalBuild
-      ..isFlutterApp = debugInfo.isFlutterApp
-      ..workspaceName = debugInfo.workspaceName
-      ..tabUrl = tab.url
-      ..tabId = tab.id,
-  );
+Future<bool> _matchesAppInStorage(String? appId, {required int tabId}) async {
+  final debugInfo = await _fetchDebugInfo(tabId);
+  return appId != null && appId == debugInfo?.appId;
 }
 
 Future<bool> _maybeSendCopyAppIdRequest(OnCommandEvent onCommandEvent) async {
@@ -243,6 +234,48 @@ Future<bool> _maybeSendCopyAppIdRequest(OnCommandEvent onCommandEvent) async {
   );
 }
 
+void _registerListeners() {
+  chrome.runtime.onMessage.listen(
+    _handleRuntimeMessages,
+  );
+  // The only extension allowed to send messages to this extension is the
+  // AngularDart DevTools extension. Its permission is set in the manifest.json
+  // externally_connectable field.
+  chrome.runtime.onMessageExternal.listen(
+    (handleMessagesFromAngularDartDevTools),
+  );
+  // The only external service that sends messages to the Dart Debug Extension
+  // is Cider.
+  chrome.runtime.onConnectExternal.listen((handleCiderConnectRequest));
+  // Update the extension icon on tab navigation:
+  chrome.tabs.onActivated
+      .listen((OnActivatedActiveInfo info) => _updateIcon(info.tabId));
+  chrome.windows.onFocusChanged.listen(_updateIcon);
+  chrome.webNavigation.onCommitted.listen((_detectNavigationAwayFromDartApp));
+
+  chrome.commands.onCommand.listen((_maybeSendCopyAppIdRequest));
+}
+
+void _setDebuggableIcon(int tabId) {
+  setExtensionIcon(SetIconDetails(path: 'static_assets/dart.png'));
+  setExtensionPopup(
+    SetPopupDetails(popup: 'static_assets/popup.html', tabId: tabId),
+  );
+}
+
+void _setDefaultIcon(int tabId) {
+  final iconPath =
+      isDevMode ? 'static_assets/dart_dev.png' : 'static_assets/dart_grey.png';
+  setExtensionIcon(SetIconDetails(path: iconPath));
+  setExtensionPopup(SetPopupDetails(popup: '', tabId: tabId));
+}
+
+void _setWarningIcon(int tabId) {
+  setExtensionPopup(
+    SetPopupDetails(popup: 'static_assets/popup.html', tabId: tabId),
+  );
+}
+
 Future<void> _updateIcon(int activeTabId) async {
   final debugInfo = await _fetchDebugInfo(activeTabId);
   if (debugInfo == null) {
@@ -256,38 +289,4 @@ Future<void> _updateIcon(int activeTabId) async {
   multipleApps == null
       ? _setDebuggableIcon(activeTabId)
       : _setWarningIcon(activeTabId);
-}
-
-void _setDebuggableIcon(int tabId) {
-  setExtensionIcon(IconInfo(path: 'static_assets/dart.png'));
-  setExtensionPopup(
-    PopupDetails(popup: 'static_assets/popup.html', tabId: tabId),
-  );
-}
-
-void _setWarningIcon(int tabId) {
-  setExtensionPopup(
-    PopupDetails(popup: 'static_assets/popup.html', tabId: tabId),
-  );
-}
-
-void _setDefaultIcon(int tabId) {
-  final iconPath =
-      isDevMode ? 'static_assets/dart_dev.png' : 'static_assets/dart_grey.png';
-  setExtensionIcon(IconInfo(path: iconPath));
-  setExtensionPopup(
-    PopupDetails(popup: '', tabId: tabId),
-  );
-}
-
-Future<DebugInfo?> _fetchDebugInfo(int tabId) {
-  return fetchStorageObject<DebugInfo>(
-    type: StorageObject.debugInfo,
-    tabId: tabId,
-  );
-}
-
-Future<bool> _matchesAppInStorage(String? appId, {required int tabId}) async {
-  final debugInfo = await _fetchDebugInfo(tabId);
-  return appId != null && appId == debugInfo?.appId;
 }

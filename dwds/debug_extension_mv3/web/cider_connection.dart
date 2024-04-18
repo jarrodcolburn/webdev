@@ -94,11 +94,10 @@ void sendErrorMessageToCider({
 }
 
 void _sendMessageToCider(String json) {
-  final message = {
+  _ciderPort!.postMessage.callAsFunction(({
     'key': _ciderDartMessageKey,
     'json': json,
-  };
-  _ciderPort!.postMessage((message)); // FIXME
+  }.jsify()));
 }
 
 extension type CiderMessage(JSObject _) implements JSObject {
@@ -107,7 +106,8 @@ extension type CiderMessage(JSObject _) implements JSObject {
 }
 
 Future<void> _handleMessageFromCider(
-    PortOnMessageEvent portOnMessageEvent) async {
+  PortOnMessageEvent portOnMessageEvent,
+) async {
   final PortOnMessageEvent(:message) = portOnMessageEvent;
   final CiderMessage(:json, :key) = message as CiderMessage;
   if (key != _ciderDartMessageKey || json is! String) {

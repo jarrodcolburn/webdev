@@ -2,17 +2,15 @@
 // for details. All rights reserved. Use of this source code is governed by a
 // BSD-style license that can be found in the LICENSE file.
 
-@JS()
 library panel;
 
 import 'dart:async';
 import 'dart:convert';
-import 'dart:html';
+import 'chrome_api.dart';
+import 'web_api.dart';
 
 import 'package:dwds/data/debug_info.dart';
-import 'package:js/js.dart';
 
-import 'chrome_api.dart';
 import 'data_serializers.dart';
 import 'data_types.dart';
 import 'debug_session.dart';

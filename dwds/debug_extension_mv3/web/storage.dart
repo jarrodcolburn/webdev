@@ -6,7 +6,6 @@ library storage;
 
 import 'dart:async';
 import 'dart:convert';
-import 'dart:ffi';
 
 import 'chrome_api.dart';
 import 'data_serializers.dart';
@@ -77,16 +76,14 @@ Future<T?> fetchStorageObject<T>({required StorageObject type, int? tabId}) asyn
   // return completer.future;
   }
 
-Future<List<T>> fetchAllStorageObjectsOfType<T>({required StorageObject type}) {
+Future<List<T>> fetchAllStorageObjectsOfType<T>({required StorageObject type}) async {
   final completer = Completer<List<T>>();
   final storageArea = _getStorageArea(type.persistence);
-  storageArea.get(
-    null,
-    allowInterop((Object? storageContents) {
-      if (storageContents == null) {
+  final storageContents = await storageArea.get( null);
+      if (storageContents.isEmpty) {
         debugWarn('No storage objects of type exist.', prefix: type.name);
         completer.complete([]);
-        return;
+        return [];
       }
       final allKeys = List<String>.from(objectKeys(storageContents));
       final storageKeys = allKeys.where((key) => key.contains(type.name));
@@ -102,22 +99,16 @@ Future<List<T>> fetchAllStorageObjectsOfType<T>({required StorageObject type}) {
         }
       }
       completer.complete(result);
-    }),
-  );
   return completer.future;
 }
 
-Future<bool> removeStorageObject<T>({required StorageObject type, int? tabId}) {
+Future<bool> removeStorageObject<T>({required StorageObject type, int? tabId}) async{
   final storageKey = _createStorageKey(type, tabId);
   final completer = Completer<bool>();
   final storageArea = _getStorageArea(type.persistence);
-  storageArea.remove(
-    [storageKey],
-    allowInterop(() {
+  await storageArea.remove( [storageKey]);
       debugLog('Removed object.', prefix: storageKey);
       completer.complete(true);
-    }),
-  );
   return completer.future;
 }
 

@@ -6,20 +6,17 @@ library utils;
 
 import 'dart:async';
 
+import 'package:chrome_extension/action.dart';
+
 import 'chrome_api.dart';
 
 Future<Tab> createTab(String url, {bool inNewWindow = false}) async {
   if (inNewWindow) {
-    final windowObj =
-        await chrome.windows.create(CreateData(focused: true, url: url));
-    if (windowObj?.tabs?.first case final Tab tab) return tab;
+    final win =
+        (await chrome.windows.create(CreateData(focused: true, url: url)));
+    if (win?.tabs?.first case final Tab tab) return tab;
   }
-  return chrome.tabs.create(
-    CreateProperties(
-      active: true,
-      url: url,
-    ),
-  );
+  return chrome.tabs.create(CreateProperties(active: true, url: url));
 }
 
 Future<Tab?> getTab(int tabId) => chrome.tabs.get(tabId);
@@ -33,7 +30,7 @@ Future<bool> removeTab(int tabId) async {
   return true;
 }
 
-void displayNotification(
+Future<void> displayNotification(
   String message, {
   bool isError = false,
   Function? callback,
@@ -51,14 +48,14 @@ void displayNotification(
   callback?.call();
 }
 
-void setExtensionIcon(IconInfo info) => switch (isMV3) {
-      true => _setExtensionIconMV3(info, null),
-      false => _setExtensionIconMV2(info, null)
+void setExtensionIcon(SetIconDetails info) => switch (isMV3) {
+      true => chrome.action.setIcon(info),
+      false => throw Exception('Not implemented for MV2')
     };
 
-void setExtensionPopup(PopupDetails details) => switch (isMV3) {
-      true => _setExtensionPopupMV3(details, null),
-      false => _setExtensionPopupMV2(details, null),
+void setExtensionPopup(SetPopupDetails details) => switch (isMV3) {
+      true => chrome.action.setPopup(details),
+      false => throw Exception('Not implemented for MV2')
     };
 
 bool? _isDevMode;
@@ -101,31 +98,4 @@ String addQueryParameters(
     },
   );
   return newUri.toString();
-}
-
-@JS('chrome.browserAction.setIcon')
-external void _setExtensionIconMV2(IconInfo iconInfo, Function? callback);
-
-@JS('chrome.action.setIcon')
-external void _setExtensionIconMV3(IconInfo iconInfo, Function? callback);
-
-@JS('chrome.browserAction.setPopup')
-external void _setExtensionPopupMV2(PopupDetails details, Function? callback);
-
-@JS('chrome.action.setPopup')
-external void _setExtensionPopupMV3(PopupDetails details, Function? callback);
-
-@JS()
-@anonymous
-class IconInfo {
-  external String get path;
-  external factory IconInfo({required String path});
-}
-
-@JS()
-@anonymous
-class PopupDetails {
-  external int get tabId;
-  external String get popup;
-  external factory PopupDetails({required int tabId, required String popup});
 }

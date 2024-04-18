@@ -27,6 +27,7 @@ dev_dependencies:
   sse: ^4.1.2
   web_socket_channel: ^2.2.0
 
+  js: any
 dependency_overrides:
   dwds:
     path: ..

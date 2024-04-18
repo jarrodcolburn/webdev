@@ -38,9 +38,7 @@ void _handleRuntimeMessages(
 }
 
 void _copyAppId(String appId) {
-  final clipboard = window.navigator.clipboard;
-  if (clipboard == null) return;
-  clipboard.writeText(appId);
+  window.navigator.clipboard.writeText(appId);
   _notifyCopiedSuccess(appId);
 }
 
