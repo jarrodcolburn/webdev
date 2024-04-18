@@ -2,11 +2,11 @@
 // for details. All rights reserved. Use of this source code is governed by a
 // BSD-style license that can be found in the LICENSE file.
 
-@JS()
 library cross_extension_communication;
 
 import 'package:js/js.dart';
-
+import 'dart:js_interop';
+import 'package:web/web.dart';
 import 'chrome_api.dart';
 import 'debug_session.dart';
 import 'logger.dart';
@@ -28,11 +28,14 @@ final _eventsForAngularDartDevTools = {
 };
 
 Future<void> handleMessagesFromAngularDartDevTools(
-  dynamic jsRequest,
-  // ignore: avoid-unused-parameters
-  MessageSender sender,
-  Function sendResponse,
-) async {
+    OnMessageExternalEvent onMessageExternalEvent
+    // dynamic jsRequest,
+    // ignore: avoid-unused-parameters
+    // MessageSender sender,
+    // Function sendResponse,
+    ) async {
+  final OnMessageExternalEvent(:sender, :sendResponse, message: jsRequest) =
+      onMessageExternalEvent;
   if (jsRequest == null) return;
   final message = jsRequest as ExternalExtensionMessage;
   if (message.name == 'chrome.debugger.sendCommand') {

@@ -2,12 +2,13 @@
 // for details. All rights reserved. Use of this source code is governed by a
 // BSD-style license that can be found in the LICENSE file.
 
-@JS()
 library background;
 
+import 'package:chrome_extension/web_navigation.dart';
 import 'package:dwds/data/debug_info.dart';
-import 'package:js/js.dart';
+// import 'package:js/js.dart';
 
+import 'dart:js_interop';
 import 'chrome_api.dart';
 import 'cider_connection.dart';
 import 'cross_extension_communication.dart';
@@ -23,45 +24,32 @@ void main() {
 }
 
 void _registerListeners() {
-  chrome.runtime.onMessage.addListener(
-    allowInterop(_handleRuntimeMessages),
+  chrome.runtime.onMessage.listen(
+    _handleRuntimeMessages,
   );
   // The only extension allowed to send messages to this extension is the
   // AngularDart DevTools extension. Its permission is set in the manifest.json
   // externally_connectable field.
-  chrome.runtime.onMessageExternal.addListener(
-    allowInterop(handleMessagesFromAngularDartDevTools),
+  chrome.runtime.onMessageExternal.listen(
+    (handleMessagesFromAngularDartDevTools),
   );
   // The only external service that sends messages to the Dart Debug Extension
   // is Cider.
-  chrome.runtime.onConnectExternal
-      .addListener(allowInterop(handleCiderConnectRequest));
+  chrome.runtime.onConnectExternal.listen((handleCiderConnectRequest));
   // Update the extension icon on tab navigation:
-  chrome.tabs.onActivated.addListener(
-    allowInterop((ActiveInfo info) async {
-      await _updateIcon(info.tabId);
-    }),
-  );
-  chrome.windows.onFocusChanged.addListener(
-    allowInterop((_) async {
-      final currentTab = await activeTab;
-      if (currentTab?.id != null) {
-        await _updateIcon(currentTab!.id);
-      }
-    }),
-  );
-  chrome.webNavigation.onCommitted
-      .addListener(allowInterop(_detectNavigationAwayFromDartApp));
+  chrome.tabs.onActivated
+      .listen((OnActivatedActiveInfo info) => _updateIcon(info.tabId));
+  chrome.windows.onFocusChanged.listen(_updateIcon);
+  chrome.webNavigation.onCommitted.listen((_detectNavigationAwayFromDartApp));
 
-  chrome.commands.onCommand
-      .addListener(allowInterop(_maybeSendCopyAppIdRequest));
+  chrome.commands.onCommand.listen((_maybeSendCopyAppIdRequest));
 }
 
 Future<void> _handleRuntimeMessages(
-  dynamic jsRequest,
-  MessageSender sender,
-  Function sendResponse,
+  OnMessageEvent onMessageEvent,
 ) async {
+  final OnMessageEvent(message: jsRequest, :sendResponse, :sender) =
+      onMessageEvent;
   if (jsRequest is! String) return;
 
   interceptMessage<String>(
@@ -98,8 +86,13 @@ Future<void> _handleRuntimeMessages(
         return;
       }
       // If this is a new Dart app, we need to clear old debug session data:
-      if (!await _matchesAppInStorage(debugInfo.appId, tabId: dartTab.id)) {
-        await clearStaleDebugSession(dartTab.id);
+      if (!await _matchesAppInStorage(debugInfo.appId,
+          tabId: dartTab.id ??
+              (throw Exception(
+                  'Tab ID is missing when trying to clear old debug session data.')))) {
+        await clearStaleDebugSession(dartTab.id ??
+            (throw Exception(
+                'Tab ID is missing when trying to clear stale debug session.')));
       }
       // Save the debug info for the Dart app in storage:
       await setStorageObject<DebugInfo>(
@@ -110,7 +103,8 @@ Future<void> _handleRuntimeMessages(
       // Update the icon to show that a Dart app has been detected:
       final currentTab = await activeTab;
       if (currentTab?.id == dartTab.id) {
-        await _updateIcon(dartTab.id);
+        await _updateIcon(dartTab.id ??
+            (throw Exception('Tab ID is missing when trying to update icon.')));
       }
     },
   );
@@ -163,7 +157,8 @@ Future<void> _handleRuntimeMessages(
         value: multipleAppsDetected,
         tabId: dartTab.id,
       );
-      _setWarningIcon(dartTab.id);
+      _setWarningIcon(dartTab.id ??
+          (throw Exception('Tab ID is missing when setting warning icon.')));
     },
   );
 
@@ -178,11 +173,11 @@ Future<void> _handleRuntimeMessages(
     },
   );
 
-  sendResponse(defaultResponse);
+  sendResponse.callAsFunction(defaultResponse);
 }
 
 Future<void> _detectNavigationAwayFromDartApp(
-  NavigationInfo navigationInfo,
+  OnCommittedDetails navigationInfo,
 ) async {
   // Ignore any navigation events within the page itself (e.g., opening a link,
   // reloading the page, reloading an IFRAME, etc):
@@ -197,12 +192,12 @@ Future<void> _detectNavigationAwayFromDartApp(
     await detachDebugger(
       tabId,
       type: TabType.dartApp,
-      reason: DetachReason.navigatedAwayFromApp,
+      reason: DetachReason.canceledByUser, // TODO was 'navigatedAwayFromApp'
     );
   }
 }
 
-bool _isInternalNavigation(NavigationInfo navigationInfo) {
+bool _isInternalNavigation(OnCommittedDetails navigationInfo) {
   return [
     'auto_subframe',
     'form_submit',
@@ -230,7 +225,8 @@ DebugInfo _addTabInfo(DebugInfo debugInfo, {required Tab tab}) {
   );
 }
 
-Future<bool> _maybeSendCopyAppIdRequest(String command, [Tab? tab]) async {
+Future<bool> _maybeSendCopyAppIdRequest(OnCommandEvent onCommandEvent) async {
+  final OnCommandEvent(:command, :tab) = onCommandEvent;
   if (command != 'copyAppId') return false;
   final tabId = (tab ?? await activeTab)?.id;
   if (tabId == null) return false;

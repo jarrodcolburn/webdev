@@ -2,122 +2,64 @@
 // for details. All rights reserved. Use of this source code is governed by a
 // BSD-style license that can be found in the LICENSE file.
 
-@JS()
 library utils;
 
 import 'dart:async';
-import 'dart:js_util';
-
-import 'package:js/js.dart';
 
 import 'chrome_api.dart';
 
-Future<Tab> createTab(String url, {bool inNewWindow = false}) {
-  final completer = Completer<Tab>();
+Future<Tab> createTab(String url, {bool inNewWindow = false}) async {
   if (inNewWindow) {
-    chrome.windows.create(
-      WindowInfo(focused: true, url: url),
-      allowInterop(
-        (WindowObj windowObj) {
-          completer.complete(windowObj.tabs.first);
-        },
-      ),
-    );
-  } else {
-    chrome.tabs.create(
-      TabInfo(
-        active: true,
-        url: url,
-      ),
-      allowInterop(completer.complete),
-    );
+    final windowObj =
+        await chrome.windows.create(CreateData(focused: true, url: url));
+    if (windowObj?.tabs?.first case final Tab tab) return tab;
   }
-  return completer.future;
-}
-
-Future<Tab?> getTab(int tabId) {
-  final completer = Completer<Tab?>();
-  chrome.tabs.get(tabId, allowInterop(completer.complete));
-  return completer.future;
-}
-
-Future<Tab?> get activeTab {
-  final completer = Completer<Tab?>();
-  final query = QueryInfo(active: true, currentWindow: true);
-  chrome.tabs.query(
-    query,
-    allowInterop((List tabs) {
-      if (tabs.isNotEmpty) {
-        completer.complete(tabs.first as Tab);
-      } else {
-        completer.complete(null);
-      }
-    }),
+  return chrome.tabs.create(
+    CreateProperties(
+      active: true,
+      url: url,
+    ),
   );
-  return completer.future;
 }
 
-Future<bool> removeTab(int tabId) {
-  final completer = Completer<bool>();
-  chrome.tabs.remove(
-    tabId,
-    allowInterop(() {
-      completer.complete(true);
-    }),
-  );
-  return completer.future;
+Future<Tab?> getTab(int tabId) => chrome.tabs.get(tabId);
+
+Future<Tab?> get activeTab async =>
+    (await chrome.tabs.query(QueryInfo(active: true, currentWindow: true)))
+        .first;
+
+Future<bool> removeTab(int tabId) async {
+  await chrome.tabs.remove(tabId);
+  return true;
 }
 
 void displayNotification(
   String message, {
   bool isError = false,
   Function? callback,
-}) {
-  chrome.notifications.create(
-    // notificationId
+}) async {
+  await chrome.notifications.create(
     null,
     NotificationOptions(
       title: '${isError ? '[Error] ' : ''}Dart Debug Extension',
       message: message,
       iconUrl:
           isError ? 'static_assets/dart_warning.png' : 'static_assets/dart.png',
-      type: 'basic',
+      type: TemplateType.basic,
     ),
-    callback,
   );
+  callback?.call();
 }
 
-void setExtensionIcon(IconInfo info) {
-  if (isMV3) {
-    _setExtensionIconMV3(
-      info,
-      // callback
-      null,
-    );
-  } else {
-    _setExtensionIconMV2(
-      info,
-      // callback
-      null,
-    );
-  }
-}
+void setExtensionIcon(IconInfo info) => switch (isMV3) {
+      true => _setExtensionIconMV3(info, null),
+      false => _setExtensionIconMV2(info, null)
+    };
 
-void setExtensionPopup(PopupDetails details) {
-  if (isMV3) {
-    _setExtensionPopupMV3(
-      details,
-      // callback
-      null,
-    );
-  } else {
-    _setExtensionPopupMV2(
-      details,
-      // callback
-      null,
-    );
-  }
-}
+void setExtensionPopup(PopupDetails details) => switch (isMV3) {
+      true => _setExtensionPopupMV3(details, null),
+      false => _setExtensionPopupMV2(details, null),
+    };
 
 bool? _isDevMode;
 

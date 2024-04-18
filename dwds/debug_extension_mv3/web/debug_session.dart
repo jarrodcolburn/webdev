@@ -2,11 +2,12 @@
 // for details. All rights reserved. Use of this source code is governed by a
 // BSD-style license that can be found in the LICENSE file.
 
-@JS()
+// @JS()
 library debug_session;
 
 import 'dart:async';
 import 'dart:convert';
+import 'dart:js_interop';
 
 import 'package:built_collection/built_collection.dart';
 import 'package:collection/collection.dart' show IterableExtension;
@@ -15,9 +16,10 @@ import 'package:dwds/data/devtools_request.dart';
 import 'package:dwds/data/extension_request.dart';
 import 'package:dwds/shared/batched_stream.dart';
 import 'package:dwds/src/sockets.dart';
-import 'package:js/js.dart';
-import 'package:js/js_util.dart' as js_util;
+// import 'package:js/js.dart';
+// import 'package:js/js_util.dart' as js_util;
 import 'package:sse/client/sse_client.dart';
+import 'package:web/web.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
 
 import 'chrome_api.dart';
@@ -43,19 +45,19 @@ const _devToolsAlreadyOpenedAlert =
 final _debugSessions = <_DebugSession>[];
 final _tabIdToTrigger = <int, Trigger>{};
 
-enum DetachReason {
-  canceledByUser,
-  connectionErrorEvent,
-  connectionDoneEvent,
-  devToolsTabClosed,
-  navigatedAwayFromApp,
-  staleDebugSession,
-  unknown;
+// enum DetachReason {
+//   canceledByUser,
+//   connectionErrorEvent,
+//   connectionDoneEvent,
+//   devToolsTabClosed,
+//   navigatedAwayFromApp,
+//   staleDebugSession,
+//   unknown;
 
-  factory DetachReason.fromString(String value) {
-    return DetachReason.values.byName(value);
-  }
-}
+//   factory DetachReason.fromString(String value) {
+//     return DetachReason.values.byName(value);
+//   }
+// }
 
 enum ConnectFailureReason {
   authentication,
@@ -86,18 +88,12 @@ enum DebuggerLocation {
   dartDevTools,
   ide;
 
-  String get displayName {
-    switch (this) {
-      case DebuggerLocation.angularDartDevTools:
-        return 'AngularDart DevTools';
-      case DebuggerLocation.chromeDevTools:
-        return 'Chrome DevTools';
-      case DebuggerLocation.dartDevTools:
-        return 'a Dart DevTools tab';
-      case DebuggerLocation.ide:
-        return 'an IDE';
-    }
-  }
+  String get displayName => switch (this) {
+        DebuggerLocation.angularDartDevTools => 'AngularDart DevTools',
+        DebuggerLocation.chromeDevTools => 'Chrome DevTools',
+        DebuggerLocation.dartDevTools => 'a Dart DevTools tab',
+        DebuggerLocation.ide => 'an IDE'
+      };
 }
 
 bool get existsActiveDebugSession => _debugSessions.isNotEmpty;
@@ -118,13 +114,11 @@ Future<void> attachDebugger(
   debugLog('Attaching to tab $dartAppTabId', verbose: true);
   _tabIdToTrigger[dartAppTabId] = trigger;
   _registerDebugEventListeners();
-  chrome.debugger.attach(
+  await chrome.debugger.attach(
     Debuggee(tabId: dartAppTabId),
     '1.3',
-    allowInterop(
-      () => _enableExecutionContextReporting(dartAppTabId),
-    ),
   );
+  () => _enableExecutionContextReporting(dartAppTabId);
 }
 
 Future<bool> detachDebugger(
@@ -133,25 +127,17 @@ Future<bool> detachDebugger(
   required DetachReason reason,
 }) async {
   final debugSession = _debugSessionForTab(tabId, type: type);
-  if (debugSession == null) return false;
+  if (debugSession case null) return false;
   final debuggee = Debuggee(tabId: debugSession.appTabId);
-  final completer = Completer<bool>();
-  chrome.debugger.detach(
-    debuggee,
-    allowInterop(() {
-      final error = chrome.runtime.lastError;
-      if (error != null) {
-        debugWarn(
-          'Error detaching tab for reason: $reason. Error: ${error.message}',
-        );
-        completer.complete(false);
-      } else {
-        _handleDebuggerDetach(debuggee, reason);
-        completer.complete(true);
-      }
-    }),
-  );
-  return completer.future;
+  await chrome.debugger.detach(debuggee);
+  if (chrome.runtime.lastError case final RuntimeLastError error) {
+    debugWarn(
+      'Error detaching tab for reason: $reason. Error: ${error.message}',
+    );
+    return false;
+  }
+  await _handleDebuggerDetach(OnDetachEvent(source: debuggee, reason: reason));
+  return true;
 }
 
 bool isActiveDebugSession(int tabId) =>
@@ -163,7 +149,7 @@ Future<void> clearStaleDebugSession(int tabId) async {
     await detachDebugger(
       tabId,
       type: TabType.dartApp,
-      reason: DetachReason.staleDebugSession,
+      reason: DetachReason.canceledByUser, // todo: was 'staleDebugSession'
     );
   } else {
     await _removeDebugSessionDataInStorage(tabId);
@@ -213,43 +199,37 @@ Future<bool> _validateTabIsDebuggable(
 }
 
 void _registerDebugEventListeners() {
-  chrome.debugger.onEvent.addListener(allowInterop(_onDebuggerEvent));
-  chrome.debugger.onDetach.addListener(
-    allowInterop((source, _) async {
+  chrome.debugger.onEvent.listen(_onDebuggerEvent);
+  chrome.debugger.onDetach.listen(
+    ((onDetachEvent) async {
       await _handleDebuggerDetach(
-        source,
-        DetachReason.canceledByUser,
+        OnDetachEvent(
+            source: onDetachEvent.source, reason: DetachReason.canceledByUser),
       );
     }),
   );
-  chrome.tabs.onRemoved.addListener(
-    allowInterop((tabId, _) async {
-      await detachDebugger(
-        tabId,
-        type: TabType.devTools,
-        reason: DetachReason.devToolsTabClosed,
-      );
-    }),
-  );
+  chrome.tabs.onRemoved.listen((onRemovedEvent) {
+    detachDebugger(
+      onRemovedEvent.tabId,
+      type: TabType.devTools,
+      reason: DetachReason.targetClosed,
+    );
+  });
 }
 
-_enableExecutionContextReporting(int tabId) {
+_enableExecutionContextReporting(int tabId) async {
   // Runtime.enable enables reporting of execution contexts creation by means of
   // executionContextCreated event. When the reporting gets enabled the event
   // will be sent immediately for each existing execution context:
-  chrome.debugger.sendCommand(
+  await chrome.debugger.sendCommand(
     Debuggee(tabId: tabId),
     'Runtime.enable',
     EmptyParam(),
-    allowInterop((_) {
-      final chromeError = chrome.runtime.lastError;
-      if (chromeError != null) {
-        final errorMessage = _translateChromeError(chromeError.message);
-        displayNotification(errorMessage, isError: true);
-        return;
-      }
-    }),
   );
+  if (chrome.runtime.lastError?.message case final String chromeError) {
+    final errorMessage = _translateChromeError(chromeError);
+    displayNotification(errorMessage, isError: true);
+  }
 }
 
 String _translateChromeError(String chromeErrorMessage) {
@@ -261,21 +241,25 @@ String _translateChromeError(String chromeErrorMessage) {
 }
 
 Future<void> _onDebuggerEvent(
-  Debuggee source,
-  String method,
-  Object? params,
+  OnEventEvent onEventEvent,
 ) async {
+  final OnEventEvent(:source, :method, :params) = onEventEvent;
+
   final tabId = source.tabId;
-  maybeForwardMessageToAngularDartDevTools(
-    method: method,
-    params: params,
-    tabId: source.tabId,
-  );
+  if (tabId != null) {
+    maybeForwardMessageToAngularDartDevTools(
+      method: method,
+      params: params,
+      tabId: tabId,
+    );
+  } else {
+    debugWarn('No tab ID found for debugger event: $method');
+  }
 
   if (method == 'Runtime.executionContextCreated') {
     // Only try to connect to DWDS if we don't already have a debugger instance:
-    if (_debuggerLocation(tabId) == null) {
-      return _maybeConnectToDwds(source.tabId, params);
+    if (tabId != null && _debuggerLocation(tabId) == null) {
+      return _maybeConnectToDwds(tabId, params);
     }
   }
 
@@ -312,34 +296,27 @@ Future<void> _maybeConnectToDwds(int tabId, Object? params) async {
   }
 }
 
-Future<bool> _isDartFrame({required int tabId, required int contextId}) {
-  final completer = Completer<bool>();
-  chrome.debugger.sendCommand(
-    Debuggee(tabId: tabId),
-    'Runtime.evaluate',
-    _InjectedParams(
-      expression:
-          '[window.\$dartAppId, window.\$dartAppInstanceId, window.\$dwdsVersion]',
-      returnByValue: true,
-      contextId: contextId,
-    ),
-    allowInterop((dynamic response) {
-      final evalResponse = response as _EvalResponse;
-      final value = evalResponse.result.value;
-      final appId = value?[0];
-      final instanceId = value?[1];
-      final dwdsVersion = value?[2];
-      final frameIdentifier = 'Frame at tab $tabId with context $contextId';
-      if (appId == null || instanceId == null) {
-        debugWarn('$frameIdentifier is not a Dart frame.');
-        completer.complete(false);
-      } else {
-        debugLog('Dart $frameIdentifier is using DWDS $dwdsVersion.');
-        completer.complete(true);
-      }
-    }),
-  );
-  return completer.future;
+Future<bool> _isDartFrame({required int tabId, required int contextId}) async {
+  final response = await chrome.debugger
+      .sendCommand(Debuggee(tabId: tabId), 'Runtime.evaluate', {
+    'expression':
+        '[window.\$dartAppId, window.\$dartAppInstanceId, window.\$dwdsVersion]',
+    'returnByValue': true,
+    contextId: contextId,
+  });
+  // FIXME
+  final evalResponse = response as _EvalResponse;
+  final value = evalResponse.result.value;
+  final appId = value?[0];
+  final instanceId = value?[1];
+  final dwdsVersion = value?[2];
+  final frameIdentifier = 'Frame at tab $tabId with context $contextId';
+  if (appId == null || instanceId == null) {
+    debugWarn('$frameIdentifier is not a Dart frame.');
+    return false;
+  }
+  debugLog('Dart $frameIdentifier is using DWDS $dwdsVersion.');
+  return true;
 }
 
 Future<bool> _connectToDwds({
@@ -367,7 +344,7 @@ Future<bool> _connectToDwds({
       await detachDebugger(
         dartAppTabId,
         type: TabType.dartApp,
-        reason: DetachReason.connectionDoneEvent,
+        reason: DetachReason.canceledByUser, // TODO was 'connectionDoneEvent'
       );
     },
     onError: (err) async {
@@ -375,7 +352,7 @@ Future<bool> _connectToDwds({
       await detachDebugger(
         dartAppTabId,
         type: TabType.dartApp,
-        reason: DetachReason.connectionErrorEvent,
+        reason: DetachReason.targetClosed, // TODO was 'connectionErrorEvent'
       );
     },
     cancelOnError: true,
@@ -435,52 +412,47 @@ void _routeDwdsEvent(String eventData, SocketClient client, int tabId) {
   }
 }
 
-void _forwardDwdsEventToChromeDebugger(
+Future _forwardDwdsEventToChromeDebugger(
   ExtensionRequest message,
   SocketClient client,
   int tabId,
-) {
+) async {
   try {
     final messageParams = message.commandParams;
     final params = messageParams == null
         ? <String, Object>{}
         : BuiltMap<String, Object>(json.decode(messageParams)).toMap();
 
-    chrome.debugger.sendCommand(
-      Debuggee(tabId: tabId),
-      message.command,
-      js_util.jsify(params),
-      allowInterop(([e]) {
-        // No arguments indicate that an error occurred.
-        if (e == null) {
-          client.sink.add(
-            jsonEncode(
-              serializers.serialize(
-                ExtensionResponse(
-                  (b) => b
-                    ..id = message.id
-                    ..success = false
-                    ..result = JSON.stringify(chrome.runtime.lastError),
-                ),
-              ),
+    final e = await chrome.debugger
+        .sendCommand(Debuggee(tabId: tabId), message.command, params);
+    // No arguments indicate that an error occurred.
+    if (e == null) {
+      client.sink.add(
+        jsonEncode(
+          serializers.serialize(
+            ExtensionResponse(
+              (b) => b
+                ..id = message.id
+                ..success = false
+                ..result = JSON.stringify(chrome.runtime.lastError),
             ),
-          );
-        } else {
-          client.sink.add(
-            jsonEncode(
-              serializers.serialize(
-                ExtensionResponse(
-                  (b) => b
-                    ..id = message.id
-                    ..success = true
-                    ..result = JSON.stringify(e),
-                ),
-              ),
+          ),
+        ),
+      );
+    } else {
+      client.sink.add(
+        jsonEncode(
+          serializers.serialize(
+            ExtensionResponse(
+              (b) => b
+                ..id = message.id
+                ..success = true
+                ..result = JSON.stringify(e),
             ),
-          );
-        }
-      }),
-    );
+          ),
+        ),
+      );
+    }
   } catch (error) {
     debugError(
       'Error forwarding ${message.command} with ${message.commandParams} to chrome.debugger: $error',
@@ -543,8 +515,9 @@ Future<void> _openDevTools(
   }
 }
 
-Future<void> _handleDebuggerDetach(Debuggee source, DetachReason reason) async {
-  final tabId = source.tabId;
+Future<void> _handleDebuggerDetach(OnDetachEvent onDetachEvent) async {
+  final OnDetachEvent(:source, :reason) = onDetachEvent;
+  final Debuggee(:tabId) = source;
   debugLog(
     'Debugger detached due to: $reason',
     verbose: true,
@@ -555,16 +528,25 @@ Future<void> _handleDebuggerDetach(Debuggee source, DetachReason reason) async {
     debugLog('Removing debug session...');
     _removeDebugSession(debugSession);
     // Notify the extension panels that the debug session has ended:
-    await _sendStopDebuggingMessage(reason, dartAppTabId: tabId);
+
+    if (tabId case null) {
+      debugLog('Tab ID is null.');
+    } else {
+      await _sendStopDebuggingMessage(reason, dartAppTabId: tabId);
+    }
     // Maybe close the associated DevTools tab as well:
     await _maybeCloseDevTools(debugSession.devToolsTabId);
   }
-  await _removeDebugSessionDataInStorage(tabId);
+  if (tabId case null) {
+    debugLog('Tab ID is null.');
+  } else {
+    await _removeDebugSessionDataInStorage(tabId);
+  }
 }
 
 Future<void> _maybeCloseDevTools(int? devToolsTabId) async {
   if (devToolsTabId == null) return;
-  final devToolsTab = await getTab(devToolsTabId);
+  final devToolsTab = await chrome.tabs.get(devToolsTabId);
   if (devToolsTab != null) {
     debugLog('Closing DevTools tab...');
     await removeTab(devToolsTabId);
@@ -593,8 +575,7 @@ void _removeDebugSession(_DebugSession debugSession) {
   // DWDS that we should close the connection, instead of relying on the done
   // event sent when the client is closed. See details:
   // https://github.com/dart-lang/webdev/pull/1595#issuecomment-1116773378
-  final event =
-      _extensionEventFor('DebugExtension.detached', js_util.jsify({}));
+  final event = _extensionEventFor('DebugExtension.detached', {});
   debugSession.sendEvent(event);
   debugSession.close();
   final removed = _debugSessions.remove(debugSession);
@@ -695,9 +676,9 @@ Future<bool> _fetchIsAuthenticated(int tabId) async {
 }
 
 Future<bool> _sendAuthRequest(String authUrl) async {
-  final response = await fetchRequest(authUrl);
-  final responseBody = response.body ?? '';
-  return responseBody.contains('Dart Debug Authentication Success!');
+  return (await (await fetchRequest(authUrl)).text().toDart)
+      .toDart
+      .contains('Dart Debug Authentication Success!');
 }
 
 Future<bool> _showWarning(
@@ -720,9 +701,9 @@ Future<bool> _showWarningNotification(String message) {
   displayNotification(
     message,
     isError: true,
-    callback: allowInterop((_) {
+    callback: (_) {
       completer.complete(true);
-    }),
+    },
   );
   return completer.future;
 }
@@ -749,24 +730,24 @@ DebuggerLocation? _debuggerLocation(int dartAppTabId) {
 }
 
 /// Construct an [ExtensionEvent] from [method] and [params].
-ExtensionEvent _extensionEventFor(String method, dynamic params) {
+ExtensionEvent _extensionEventFor(String method, Map params) {
   return ExtensionEvent(
     (b) => b
-      ..params = jsonEncode(json.decode(JSON.stringify(params)))
+      ..params = jsonEncode(params)
       ..method = jsonEncode(method),
   );
 }
 
-Future<String> _getTabUrl(int tabId) async {
-  final tab = await getTab(tabId);
-  return tab?.url ?? '';
-}
+Future<String> _getTabUrl(int tabId) async =>
+    (await chrome.tabs.get(tabId)).url ?? '';
 
-@JS()
-@anonymous
-class EmptyParam {
-  external factory EmptyParam();
-}
+get EmptyParam => {};
+
+// @JS()
+// @anonymous
+// class EmptyParam {
+//   external factory EmptyParam();
+// }
 
 class _DebugSession {
   // The tab ID that contains the running Dart application.
@@ -884,9 +865,7 @@ String? _authUrl(String? extensionUrl) {
   }
 }
 
-@JS()
-@anonymous
-class _EvalResponse {
+extension type _EvalResponse(JSObject map) implements JSObject {
   external _EvalResult get result;
 }
 

@@ -2,13 +2,10 @@
 // for details. All rights reserved. Use of this source code is governed by a
 // BSD-style license that can be found in the LICENSE file.
 
-@JS()
 library cider_connection;
 
 import 'dart:convert';
-import 'dart:js_util';
-
-import 'package:js/js.dart';
+import 'dart:js_interop';
 
 import 'chrome_api.dart';
 import 'debug_session.dart';
@@ -60,8 +57,8 @@ void handleCiderConnectRequest(Port port) {
     debugLog('Received connect request from Cider', verbose: true);
     _ciderPort = port;
 
-    port.onMessage.addListener(
-      allowInterop(_handleMessageFromCider),
+    port.onMessage.listen(
+      (_handleMessageFromCider),
     );
 
     sendMessageToCider(messageType: CiderMessageType.connected);
@@ -101,12 +98,18 @@ void _sendMessageToCider(String json) {
     'key': _ciderDartMessageKey,
     'json': json,
   };
-  _ciderPort!.postMessage(jsify(message));
+  _ciderPort!.postMessage((message)); // FIXME
 }
 
-Future<void> _handleMessageFromCider(dynamic message, Port _) async {
-  final key = getProperty(message, 'key');
-  final json = getProperty(message, 'json');
+extension type CiderMessage(JSObject _) implements JSObject {
+  external String? get json;
+  external String? get key;
+}
+
+Future<void> _handleMessageFromCider(
+    PortOnMessageEvent portOnMessageEvent) async {
+  final PortOnMessageEvent(:message) = portOnMessageEvent;
+  final CiderMessage(:json, :key) = message as CiderMessage;
   if (key != _ciderDartMessageKey || json is! String) {
     sendErrorMessageToCider(
       errorType: CiderErrorType.invalidRequest,

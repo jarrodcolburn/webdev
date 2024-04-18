@@ -2,12 +2,10 @@
 // for details. All rights reserved. Use of this source code is governed by a
 // BSD-style license that can be found in the LICENSE file.
 
-@JS()
 library copier;
 
-import 'dart:html';
-
-import 'package:js/js.dart';
+import 'dart:js_interop';
+import 'package:web/web.dart' show window;
 
 import 'chrome_api.dart';
 import 'messaging.dart';
@@ -17,18 +15,18 @@ void main() {
 }
 
 void _registerListeners() {
-  chrome.runtime.onMessage.addListener(
-    allowInterop(_handleRuntimeMessages),
+  chrome.runtime.onMessage.listen(
+    (_handleRuntimeMessages),
   );
 }
 
 void _handleRuntimeMessages(
-  dynamic jsRequest,
-  MessageSender sender,
-  Function sendResponse,
+  OnMessageEvent onMessageEvent,
 ) {
+  final OnMessageEvent(message: jsRequest, :sendResponse, :sender) =
+      onMessageEvent;
   interceptMessage<String>(
-    message: jsRequest,
+    message: jsRequest.toString(),
     expectedType: MessageType.appId,
     expectedSender: Script.background,
     expectedRecipient: Script.copier,
@@ -36,7 +34,7 @@ void _handleRuntimeMessages(
     messageHandler: _copyAppId,
   );
 
-  sendResponse(defaultResponse);
+  sendResponse.callAsFunction(defaultResponse);
 }
 
 void _copyAppId(String appId) {

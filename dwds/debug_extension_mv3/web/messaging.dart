@@ -154,43 +154,20 @@ Future<bool> _sendMessage({
   required Script sender,
   required Script recipient,
   int? tabId,
-}) {
-  final message = Message(
-    to: recipient,
-    from: sender,
-    type: type,
-    body: body,
-  ).toJSON();
-  final completer = Completer<bool>();
-  void responseHandler([dynamic _]) {
-    final error = chrome.runtime.lastError;
-    if (error != null) {
-      debugError(
-        'Error sending $type to $recipient from $sender: ${error.message}',
-      );
+}) async {
+  final message =
+      Message(to: recipient, from: sender, type: type, body: body).toJSON();
+  try {
+    if (tabId case null) {
+      await chrome.runtime.sendMessage(null, message, null);
+    } else {
+      await chrome.tabs.sendMessage(tabId, message, null);
     }
-    completer.complete(error != null);
+  } catch (error) {
+    debugError('Error sending $type to $recipient from $sender: $error');
+    return false;
   }
-
-  if (tabId != null) {
-    chrome.tabs.sendMessage(
-      tabId,
-      message,
-      // options
-      null,
-      allowInterop(responseHandler),
-    );
-  } else {
-    chrome.runtime.sendMessage(
-      // id
-      null,
-      message,
-      // options
-      null,
-      allowInterop(responseHandler),
-    );
-  }
-  return completer.future;
+  return true;
 }
 
 // Verify the message sender is our extension.

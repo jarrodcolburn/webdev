@@ -66,8 +66,8 @@ Future<void> main() async {
 }
 
 Future<void> _registerListeners() async {
-  chrome.storage.onChanged.addListener(allowInterop(_handleStorageChanges));
-  chrome.runtime.onMessage.addListener(allowInterop(_handleRuntimeMessages));
+  chrome.storage.onChanged.listen((_handleStorageChanges));
+  chrome.runtime.onMessage.listen((_handleRuntimeMessages));
   final launchDebugConnectionButton =
       document.getElementById(_launchDebugConnectionButtonId) as ButtonElement;
   launchDebugConnectionButton.addEventListener('click', _launchDebugConnection);
@@ -76,12 +76,9 @@ Future<void> _registerListeners() async {
 }
 
 void _handleRuntimeMessages(
-  dynamic jsRequest,
-  // ignore: avoid-unused-parameters
-  MessageSender sender,
-  // ignore: avoid-unused-parameters
-  Function sendResponse,
+  OnMessageEvent onMessageEvent,
 ) {
+  final OnMessageEvent(:sender, message: jsRequest) = onMessageEvent;
   if (jsRequest is! String) return;
 
   interceptMessage<DebugStateChange>(
@@ -124,7 +121,9 @@ void _handleRuntimeMessages(
   );
 }
 
-void _handleStorageChanges(Object storageObj, String _) {
+void _handleStorageChanges(OnChangedEvent onChangeEvent) {
+  final OnChangedEvent(:changes) =
+      onChangeEvent; // FIXME is storageObj in changes?
   interceptStorageChange<DebugInfo>(
     storageObj: storageObj,
     expectedType: StorageObject.debugInfo,
@@ -218,16 +217,16 @@ void _updateColorThemeForElement(
 }
 
 void _handleDebugConnectionLost(String? reason) {
-  final detachReason = DetachReason.fromString(reason ?? 'unknown');
+  final detachReason = DetachReason.fromJS(reason ?? 'unknown');
   _removeDevToolsIframe();
   _updateElementVisibility(_landingPageId, visible: true);
   switch (detachReason) {
     case DetachReason.canceledByUser:
       return;
-    case DetachReason.staleDebugSession:
-    case DetachReason.navigatedAwayFromApp:
-      _showWarningBanner(_noAppDetectedMsg);
-      break;
+    // case DetachReason.staleDebugSession: // TODO was 'staleDebugSession'
+    // case DetachReason.navigatedAwayFromApp: // TODO was 'navigatedAwayFromApp'
+    // _showWarningBanner(_noAppDetectedMsg);
+    // break;
     default:
       _showWarningBanner(_lostConnectionMsg);
       break;
